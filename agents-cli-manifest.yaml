@@ -1,19 +1,15 @@
-name: 'sre-triage-agent'
-acli_version: '1.7.0'
-agent_directory: 'app'
-region: 'us-east1'
-base_template: 'adk'
+name: sre-triage-agent
+acli_version: 1.7.0
+agent_directory: app
+region: asia-southeast1
+base_template: adk
 generated_at: '2026-09-30T22:08:29.767526+00:00'
-language: 'python'
-framework: 'google-adk'
+language: python
+framework: google-adk
 create_params:
-  # The ADK name of the root agent, as rendered into the agent source. Rename
-  # the agent and you must change it in both places: telemetry reports this as
-  # gen_ai.agent.name, and it is what agents-cli reports for the project.
-  root_agent_name: 'sre_triage_agent'
-  deployment_target: 'none'
-  session_type: 'in_memory'
-  cicd_runner: 'skip'
+  root_agent_name: sre_triage_agent
+  deployment_target: agent_runtime
+  cicd_runner: skip
   is_a2a: true
-  agent_gateway: False
-  agent_guidance_filename: 'GEMINI.md'
+  agent_gateway: false
+  agent_guidance_filename: GEMINI.md
