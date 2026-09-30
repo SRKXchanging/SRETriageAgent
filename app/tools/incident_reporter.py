@@ -1,0 +1,141 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Incident report generation tool for SRE triage.
+
+Generates standardized SRE incident triage reports and post-mortems formatted in Markdown.
+"""
+
+from datetime import datetime, timezone
+import hashlib
+
+
+def generate_incident_report(
+    title: str,
+    severity: str,
+    status: str,
+    impacted_services: list[str],
+    executive_summary: str,
+    root_cause_analysis: str,
+    timeline: list[str],
+    mitigation_steps: list[str],
+    action_items: list[str] | None = None,
+    blast_radius: str = "TBD",
+    incident_id: str | None = None,
+) -> str:
+    """Generates a comprehensive, production-grade SRE Incident Triage Report.
+
+    Formats an incident report conforming to Google SRE post-mortem and incident
+    triage standards. Includes executive summary, severity badge, blast radius,
+    chronological timeline, root cause analysis, immediate mitigations, and preventative action items.
+
+    Args:
+        title: Clear, concise title of the incident (e.g. 'Authentication Timeout Outage').
+        severity: Classification severity ('CRITICAL', 'WARNING', or 'INFO').
+        status: Current incident lifecycle status ('INVESTIGATING', 'IDENTIFIED', 'MITIGATING', or 'RESOLVED').
+        impacted_services: Microservices, components, or databases affected.
+        executive_summary: 2-4 sentence executive overview of what occurred and its impact.
+        root_cause_analysis: Technical breakdown of the root cause or primary failure hypothesis.
+        timeline: Chronological list of events with timestamps (e.g. ['12:00:00 UTC - Outage detected']).
+        mitigation_steps: List of actions performed or recommended to remediate the immediate issue.
+        action_items: List of preventive long-term tasks and post-incident improvements.
+        blast_radius: Description of user/system blast radius (e.g. '30% of checkout traffic', 'Internal analytics only').
+        incident_id: Unique incident identifier. If not provided, an ID is generated automatically.
+
+    Returns:
+        A Markdown formatted incident triage report ready for stakeholder communication,
+        Slack incident channels, and Jira/PagerDuty documentation.
+    """
+    now_utc = datetime.now(timezone.utc)
+    date_str = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    # Generate incident ID if not provided
+    if not incident_id:
+        hash_suffix = hashlib.md5(f"{title}-{date_str}".encode()).hexdigest()[:6].upper()
+        incident_id = f"INC-{now_utc.strftime('%Y%m%d')}-{hash_suffix}"
+
+    norm_severity = severity.strip().upper()
+    if norm_severity not in ("CRITICAL", "WARNING", "INFO"):
+        norm_severity = "WARNING"
+
+    severity_icons = {
+        "CRITICAL": "🔴 CRITICAL",
+        "WARNING": "🟡 WARNING",
+        "INFO": "🔵 INFO",
+    }
+    sev_badge = severity_icons.get(norm_severity, norm_severity)
+
+    services_str = ", ".join(f"`{s}`" for s in impacted_services) if impacted_services else "None identified"
+
+    # Format timeline
+    timeline_lines = "\n".join(f"- {event}" for event in timeline) if timeline else "- No timeline events recorded."
+
+    # Format mitigations
+    mitigation_lines = "\n".join(f"- [x] {step}" for step in mitigation_steps) if mitigation_steps else "- TBD"
+
+    # Format action items
+    action_items_list = action_items or [
+        "Conduct blameless post-mortem review with engineering team",
+        "Add automated alerting and synthetic monitors for this failure mode",
+        "Improve service circuit breaker and graceful degradation logic",
+    ]
+    action_lines = "\n".join(f"- [ ] {item}" for item in action_items_list)
+
+    report = f"""# SRE Incident Triage Report: {title}
+
+| Metric | Details |
+| :--- | :--- |
+| **Incident ID** | `{incident_id}` |
+| **Severity** | **{sev_badge}** |
+| **Status** | **`{status.upper()}`** |
+| **Impacted Services** | {services_str} |
+| **Blast Radius** | {blast_radius} |
+| **Report Timestamp** | {date_str} |
+
+---
+
+## 1. Executive Summary
+{executive_summary}
+
+---
+
+## 2. Impact Assessment
+- **Affected Services:** {services_str}
+- **Estimated Blast Radius:** {blast_radius}
+- **Severity Rating:** **{norm_severity}**
+
+---
+
+## 3. Incident Timeline
+{timeline_lines}
+
+---
+
+## 4. Root Cause Analysis (RCA)
+{root_cause_analysis}
+
+---
+
+## 5. Immediate Mitigation & Recovery Steps
+{mitigation_lines}
+
+---
+
+## 6. Preventative Action Items
+{action_lines}
+
+---
+*Report generated by SRE Triage Agent via Google ADK*
+"""
+    return report.strip()
