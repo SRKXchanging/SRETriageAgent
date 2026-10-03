@@ -16,9 +16,8 @@
 
 Generates standardized SRE incident triage reports and post-mortems formatted in Markdown.
 """
-
-from datetime import datetime, timezone
 import hashlib
+from datetime import UTC, datetime
 
 
 def generate_incident_report(
@@ -57,12 +56,14 @@ def generate_incident_report(
         A Markdown formatted incident triage report ready for stakeholder communication,
         Slack incident channels, and Jira/PagerDuty documentation.
     """
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     date_str = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
 
     # Generate incident ID if not provided
     if not incident_id:
-        hash_suffix = hashlib.md5(f"{title}-{date_str}".encode()).hexdigest()[:6].upper()
+        hash_suffix = hashlib.md5(
+            f"{title}-{date_str}".encode(), usedforsecurity=False
+        ).hexdigest()[:6].upper()
         incident_id = f"INC-{now_utc.strftime('%Y%m%d')}-{hash_suffix}"
 
     norm_severity = severity.strip().upper()

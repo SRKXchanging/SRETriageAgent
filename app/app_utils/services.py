@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import functools
 import os
+from pathlib import Path
 
 from google.adk.artifacts import GcsArtifactService, InMemoryArtifactService
 from google.adk.cli.service_registry import get_service_registry
@@ -31,9 +32,7 @@ from google.adk.cli.utils.service_factory import create_session_service_from_opt
 SESSION_SERVICE_URI = "shared://session"
 ARTIFACT_SERVICE_URI = "shared://artifact"
 
-_AGENT_DIR = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-)
+_AGENT_DIR = str(Path(__file__).resolve().parents[2])
 
 
 @functools.cache

@@ -23,8 +23,8 @@ from .incident_reporter import generate_incident_report
 from .log_parser import filter_logs, parse_server_logs
 
 __all__ = [
-    "parse_server_logs",
-    "filter_logs",
     "classify_incident_severity",
+    "filter_logs",
     "generate_incident_report",
+    "parse_server_logs",
 ]

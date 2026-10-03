@@ -18,11 +18,10 @@ Extracts structured events, error frequencies, stack traces, and anomaly
 indicators from diverse server log formats (JSON, Syslog, Apache/Nginx, K8s, Stacktraces).
 """
 
-from collections import Counter
 import json
 import re
+from collections import Counter
 from typing import Any
-
 
 # Common regex patterns for structured/unstructured log formats
 ISO_TIMESTAMP_RE = re.compile(
@@ -34,17 +33,22 @@ SYSLOG_TIMESTAMP_RE = re.compile(
 HTTP_ACCESS_RE = re.compile(
     r'(?P<ip>\S+)\s+\S+\s+\S+\s+\[(?P<time>[^\]]+)\]\s+"(?P<method>[A-Z]+)\s+(?P<path>\S+)\s+HTTP/[0-9.]+"\s+(?P<status>\d{3})\s+(?P<bytes>\S+)'
 )
-BRACKETED_LOG_RE = re.compile(
-    r"(?:\[?(?P<timestamp>\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?[^\]]*)\]?\s*)?"
-    r"(?:\[?(?P<level>FATAL|CRITICAL|ERROR|WARN|WARNING|INFO|DEBUG|TRACE)\]?\s*)?"
-    r"(?:\[?(?P<service>[a-zA-Z0-9_\-\.\/]+)\]?:\s*|\s+)"
-    r"(?P<message>.*)",
-    re.IGNORECASE,
-)
 TRACE_ID_RE = re.compile(
     r"(?:trace_id|traceId|correlation_id|request_id|requestId)[=:\s\"']+([a-zA-Z0-9_\-]+)",
     re.IGNORECASE,
 )
+LOG_LEVEL_RE = re.compile(
+    r"\b(CRITICAL|FATAL|ERROR|WARN|WARNING|INFO|DEBUG)\b",
+    re.IGNORECASE,
+)
+SERVICE_BRACKET_RE = re.compile(r"\[([a-zA-Z0-9_\-.]{3,30})\]")
+STATUS_CODE_RE = re.compile(
+    r"\b(?:status|HTTP|code)[=:\s]+(\d{3})\b",
+    re.IGNORECASE,
+)
+HEX_ID_RE = re.compile(r"\b[0-9a-fA-F]{8,}\b")
+IP_ADDR_RE = re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
+EXCEPTION_HEADER_RE = re.compile(r"^[a-zA-Z0-9_.]+(?:Exception|Error):")
 
 
 def _normalize_severity(level_str: str | None) -> str:
@@ -72,9 +76,7 @@ def _parse_single_log_line(line: str) -> dict[str, Any]:
         return {}
 
     # Try parsing as JSON first
-    if (stripped.startswith("{") and stripped.endswith("}")) or (
-        stripped.startswith("[") and stripped.endswith("]")
-    ):
+    if stripped.startswith(("{", "[")) and stripped.endswith(("}", "]")):
         try:
             data = json.loads(stripped)
             if isinstance(data, dict):
@@ -165,24 +167,23 @@ def _parse_single_log_line(line: str) -> dict[str, Any]:
 
     # Detect log level keyword
     level = "INFO"
-    for lvl in ("CRITICAL", "FATAL", "ERROR", "WARN", "WARNING", "INFO", "DEBUG"):
-        if re.search(rf"\b{lvl}\b", stripped, re.IGNORECASE):
-            level = _normalize_severity(lvl)
-            break
+    if level_match := LOG_LEVEL_RE.search(stripped):
+        level = _normalize_severity(level_match.group(1))
 
     # Extract service name if in brackets or formatted: e.g. [auth-service]
     service = "unknown"
-    service_match = re.search(r"\[([a-zA-Z0-9_\-\.]{3,30})\]", stripped)
-    if service_match:
-        # verify it's not the timestamp or severity
+    if service_match := SERVICE_BRACKET_RE.search(stripped):
         candidate = service_match.group(1)
-        if candidate.upper() not in ("INFO", "WARN", "WARNING", "ERROR", "CRITICAL", "FATAL", "DEBUG") and not candidate.isdigit():
+        if (
+            candidate.upper()
+            not in ("INFO", "WARN", "WARNING", "ERROR", "CRITICAL", "FATAL", "DEBUG")
+            and not candidate.isdigit()
+        ):
             service = candidate
 
     # Status code detection (e.g. status=500, HTTP 503)
     status_code = None
-    status_match = re.search(r"\b(?:status|HTTP|code)[=:\s]+(\d{3})\b", stripped, re.IGNORECASE)
-    if status_match:
+    if status_match := STATUS_CODE_RE.search(stripped):
         status_code = int(status_match.group(1))
 
     return {
@@ -223,12 +224,11 @@ def _extract_stack_traces(raw_logs: str) -> list[dict[str, str]]:
         # In trace continuation
         elif in_trace:
             if (
-                stripped.startswith("at ")  # Java
-                or stripped.startswith("File \"")  # Python
+                stripped.startswith("at ")  # Java / JS / Node
+                or stripped.startswith('File "')  # Python
                 or stripped.startswith("goroutine ")  # Go
                 or stripped.startswith("Caused by:")
-                or re.match(r"^\s+at\s+", line)  # JS / Node
-                or re.match(r"^[a-zA-Z0-9_.]+(?:Exception|Error):", stripped)
+                or EXCEPTION_HEADER_RE.match(stripped)
             ):
                 current_trace.append(line)
             elif not stripped:
@@ -294,8 +294,8 @@ def parse_server_logs(raw_logs: str) -> str:
 
             if level in ("CRITICAL", "ERROR"):
                 # Clean message to cluster common error messages
-                clean_msg = re.sub(r"\b[0-9a-fA-F]{8,}\b", "<ID>", event.get("message", ""))
-                clean_msg = re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "<IP>", clean_msg)
+                clean_msg = HEX_ID_RE.sub("<ID>", event.get("message", ""))
+                clean_msg = IP_ADDR_RE.sub("<IP>", clean_msg)
                 clean_msg = clean_msg[:120]  # truncate long lines
                 error_patterns[clean_msg] += 1
 
@@ -367,31 +367,27 @@ def filter_logs(
     norm_keyword = keyword.strip().lower() if keyword else ""
     norm_service = service.strip().lower() if service else ""
 
+    allowed_levels = ("ERROR", "CRITICAL") if norm_level == "ERROR" else (norm_level,)
+
     for line in lines:
         if not line.strip():
             continue
+
+        # Early filter by keyword before parsing
+        if norm_keyword and norm_keyword not in line.lower():
+            continue
+
         event = _parse_single_log_line(line)
         if not event:
             continue
 
         # Check level
-        if norm_level:
-            event_level = event.get("level", "").upper()
-            if norm_level == "ERROR" and event_level not in ("ERROR", "CRITICAL"):
-                continue
-            elif norm_level != "ERROR" and event_level != norm_level:
-                continue
+        if norm_level and event.get("level", "").upper() not in allowed_levels:
+            continue
 
         # Check service
-        if norm_service:
-            event_service = event.get("service", "").lower()
-            if norm_service not in event_service:
-                continue
-
-        # Check keyword
-        if norm_keyword:
-            if norm_keyword not in line.lower():
-                continue
+        if norm_service and norm_service not in event.get("service", "").lower():
+            continue
 
         matches.append(event)
         if len(matches) >= max_results:

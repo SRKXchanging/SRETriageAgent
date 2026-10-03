@@ -107,10 +107,9 @@ def classify_incident_severity(
     if total_requests > 0:
         error_rate_pct = round((error_count / total_requests) * 100, 2)
 
+    search_targets = [error_summary_lower, *error_types]
     has_critical_signature = any(
-        kw in error_summary_lower for kw in CRITICAL_FAILURE_KEYWORDS
-    ) or any(
-        any(kw in err for kw in CRITICAL_FAILURE_KEYWORDS) for err in error_types
+        kw in target for target in search_targets for kw in CRITICAL_FAILURE_KEYWORDS
     )
 
     # --- Classification Logic ---
